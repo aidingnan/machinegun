@@ -51,6 +51,26 @@ class Soldier {
     rl2.on('line', msg => {
       console.log(this.mac, '  iperf stdout:  ', msg)
     })
+
+    setTimeout(() => this.startIperfClient(), 2000)
+  }
+
+  startIperfClient() {
+    child.exec(`ssh root@${this.address} ifconfig | grep -A1  wlan0 | grep inet | awk '{ print $2 }'`, (err, stdout, stderr) => {
+      if (err || stderr) {
+        return console.log(err || stderr)
+      }
+      let wlanaddr = stdout.toString().trim()
+      let iperfC = child.spawn('iperf3', ['-c', wlanaddr])
+      let rl = readline.createInterface({ input: iperfC.stderr })
+      rl.on('line', msg => {
+        console.log('*** HOST ***  iperf client stderr:  ', msg)
+      })
+      let rl2 = readline.createInterface({ input: iperfC.stdout })
+      rl2.on('line', msg => {
+        console.log('*** HOST *** iperf client stdout:  ', msg)
+      })
+    })
   }
 
   startDD() {
