@@ -1,0 +1,8 @@
+{
+  "duration": 10,
+  "testBluetooth": false,
+  "wifi": {
+    "ssid": "Xiaomi_123_5G",
+    "password": "wisnuc123456"
+  }
+}
