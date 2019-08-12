@@ -5,283 +5,13 @@ const crypto = require('crypto')
 const http = require('http')
 const os = require('os')
 
-const blessed = require('blessed')
-
 const ifacemon = require('./lib/iface-monitor')
-
-const screen = blessed.screen({ fullUnicode: true })
-
-const layout = blessed.layout({
-  parent: screen,
-  width: '100%',
-  height: '100%' 
-})
-
-const blist = blessed.ListTable({
-  parent: layout,
-  width: '100%',
-  height: '50%',
-})
-
-const blog = blessed.log({ parent: layout,
-  keys: true,
-  width: '100%',
-  height: '50%',
-  focused: true,
-})
-
-screen.key(['escape', 'q', 'C-c'], function(ch, key) {
-  process.exit(0);
-})
-
-/**
-screen.on('resize', () => {
-  blist.emit('attach')
-  blog.emit('attach')
-})
-*/
-
-screen.render();
+const { blog, blist } = require('./lib/ui')
+const Soldier = require('./lib/Soldier')
 
 // format rate: 'NNN.N MB/s' length 10
 
-const strip = string => string.replace(/[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d\/#&.:=?%@~_]*)*)?\u0007)|(?:(?:\d{1,4}(?:;\d{0,4})*)?[\dA-PR-TZcf-ntqry=><~]))/g, '')
-
-const _log = fs.createWriteStream('log', { flags: 'a'})
-const log = string => _log.write(string + '\n')
-
 const Soldiers = new Map()
-
-class StressNg extends EventEmitter {
-  constructor (address) {
-    super()
-    this.address = address
-    this.child = child.spawn('ssh', ['-o', 'StrictHostKeyChecking no', '-tt', `root@${this.address}`, 'stress-ng', '--cpu', '4', '--io', '4', '--vm-bytes', '128M'])
-    this.child.stdout.once('data', data => {
-      blog.log(`${this.address}`, '开始压力测试')
-      this.emit('tick')
-    })
-
-    this.child.on('error', err => {
-      this.child.removeAllListeners()
-      this.child.on('error', err => {})
-      this.child.kill()
-      this.error = err
-      this.child = null
-    })
-    this.child.on('close', (code, signal) => {
-      this.child.removeAllListeners()
-      let err = new Error('unexpected close')
-      err.code = code
-      err.signal = signal
-      this.error = err
-      this.child = null
-    })
-  }
-
-  destroy () {
-    if (this.child) {
-      this.child.kill()
-      this.child = null
-    }
-  } 
-
-  brief () {
-    let s = this.child ? '运行' : this.error ? '错误' : '停止'
-    return { s }
-  }
-}
-
-class WifiTest extends EventEmitter {
-  constructor (address, hostAddress, ssid, password) {
-    super()
-    this.address = address
-    this.results = []
-    this.child = child.exec(`ssh  -o "StrictHostKeyChecking no" -tt root@${this.address} nmcli d wifi connect ${ssid} password ${password}`, (err, stdout) => {
-      if (err) {
-        // console.log(err)
-        this.child = null
-        this.error = err
-      } else {
-        let out = strip(stdout.toString()).trim() 
-        if (out.includes('successfully activated')) {
-          const run = () => {
-            let start = new Date().getTime()
-            // note the double escape, one is escaping vertical pipe and the other is escaping the first one, which is required by js template literal
-            let cmd = `ssh -o "StrictHostKeyChecking no" -tt root@${this.address} wget --quiet -O - http://10.10.9.75:3000 \\| sha256sum`
-            this.child = child.exec(cmd, (err, stdout) => {
-              if (err) {
-                this.child = null
-                this.error = err
-                // console.log(err)
-                process.exit(1)
-              } else {
-                // TODO check sha256
-                let end = new Date().getTime()
-                let dur = (end - start) / 1000
-                let rate = `${1024 / dur} MB/s`
-                this.results.push(rate)
-                this.emit('tick')
-                run()
-              }
-            })
-          }
-          run()
-        } else {
-          let err = new Error(out)
-          this.child = null
-          this.error = err
-        }
-      }
-    })
-  }
-
-  brief () {
-    let s = this.child ? '运行' : this.error ? '错误' : '停止'
-    let avg = this.results.length ? this.results .map(r => parseInt(r.trim().split(' ')[0])) .reduce((sum, n) => sum + n, 0) / this.results.length : 0
-    let rate = `${avg.toFixed(1).toString()} MB/s`
-    let time = this.results.length.toString()
-    return { s, dRate: rate, dTime: time }
-  }
-}
-
-class EmmcTest extends EventEmitter {
-  constructor (address) {
-    super()
-    this.address = address
-    this.results = []
-    let ocmd = `ssh -o "StrictHostKeyChecking no" -tt root@${this.address} dd if=/dev/zero of=/root/test bs=4M count=256 oflag=direct`
-    let icmd = `ssh -o "StrictHostKeyChecking no" -tt root@${this.address} dd if=/root/test of=/dev/null bs=4M count=256 iflag=direct`
-    const run = () => {
-      let cmd = this.results.length > 1 ? icmd : ocmd
-      blog.log(`${this.address}`, `第${this.results.length + 1}次读写测试`)
-      this.child = child.exec(cmd, (err, stdout) => {
-        if (err) {
-          this.child = null
-          this.error = err
-        } else {
-          let rate = strip(stdout.toString())
-            .split('\n')
-            .find(l => l.includes('copied'))
-            .trim()
-            .split(',')
-            .pop()
-            .trim()
-          this.results.push(rate)
-          this.emit('tick')
-          run()
-        }
-      })
-    }
-    run()
-  }
-
-  brief () {
-    let s = this.child ? '运行' : this.error ? '错误' : '停止'
-    let ws = this.results.slice(0, 2)
-    let rs = this.results.slice(2)
-    let wAvg = ws.length ? ws.map(r => parseInt(r.trim().split(' ')[0])) .reduce((sum, n) => sum + n, 0) / ws.length : 0
-    let rAvg = rs.length ? rs.map(r => parseInt(r.trim().split(' ')[0])) .reduce((sum, n) => sum + n, 0) / rs.length : 0
-    let wRate = `${wAvg.toFixed(1).toString()} MB/s`
-    let wTime = ws.length.toString()
-    let rRate = `${rAvg.toFixed(1).toString()} MB/s`
-    let rTime = rs.length.toString()
-    return { s, wTime, wRate, rTime, rRate }
-  }
-}
-
-class SataTest extends EventEmitter {
-  constructor (address) {
-    super ()
-    this.address = address
-    this.results = []
-    let ocmd = `ssh -o "StrictHostKeyChecking no" -tt root@${this.address} dd if=/dev/zero of=/run/sata/test bs=4M count=256 oflag=direct`
-    let icmd = `ssh -o "StrictHostKeyChecking no" -tt root@${this.address} dd if=/run/sata/test of=/dev/null bs=4M count=256 iflag=direct`
-    this.child = child.exec(`ssh -o "StrictHostKeyChecking no" -tt root@${this.address} mkdir -p /run/sata`, err => {
-      if (err) {
-        this.child = null
-        this.error = err
-        return
-      }
-
-      this.child = child.exec(`ssh -o "StrictHostKeyChecking no" -tt root@${this.address} mount -t btrfs /dev/sda /run/sata`, err => {
-        const run = () => {
-          let cmd = this.results.length > 1 ? icmd : ocmd 
-          this.child = child.exec(cmd, (err, stdout) => {
-            if (err) {
-              this.child = null
-              this.error = err
-            } else {
-              let rate = strip(stdout.toString())
-                .split('\n')
-                .find(l => l.includes('copied'))
-                .trim()
-                .split(',')
-                .pop()
-                .trim()
-
-              this.results.push(rate)
-              this.emit('tick')
-              run()
-            }
-          })
-        }
-        run()
-      })
-    })
-  }
-
-  brief () {
-    let s = this.child ? '运行' : this.error ? '错误' : '停止'
-    let ws = this.results.slice(0, 2)
-    let rs = this.results.slice(2)
-    let wAvg = ws.length ? ws.map(r => parseInt(r.trim().split(' ')[0])) .reduce((sum, n) => sum + n, 0) / ws.length : 0
-    let rAvg = rs.length ? rs.map(r => parseInt(r.trim().split(' ')[0])) .reduce((sum, n) => sum + n, 0) / rs.length : 0
-    let wRate = `${wAvg.toFixed(1).toString()} MB/s`
-    let wTime = ws.length.toString()
-    let rRate = `${rAvg.toFixed(1).toString()} MB/s`
-    let rTime = rs.length.toString()
-    return { s, wTime, wRate, rTime, rRate }
-  }
-}
-
-class Soldier extends EventEmitter {
-  constructor(iface, ssid, password) {
-    super()
-    this.name = iface.name
-    this.mac = iface.mac
-    this.address = iface.buddyIp
-    this.ssid = ssid
-    this.password = password
-    this.name = iface.name
-    this.run()
-  }
-  
-  run() {
-    this.stressNg = new StressNg(this.address)
-    this.stressNg.on('tick', () => this.emit('tick'))
-    this.wifi = new WifiTest(this.address, null, this.ssid, this.password)
-    this.wifi.on('tick', () => this.emit('tick'))
-    this.emmc = new EmmcTest(this.address)
-    this.emmc.on('tick', () => this.emit('tick'))
-    this.sata = new SataTest(this.address)
-    this.sata.on('tick', () => this.emit('tick'))
-  }
-
-  exit() {
-    Soldiers.delete(this.mac)
-  }
-
-  brief () {
-    let bs = [] 
-    bs.push(this.mac)
-    bs.push(this.stressNg.brief())
-    bs.push(this.emmc.brief())
-    bs.push(this.sata.brief())
-    bs.push(this.wifi.brief())
-    return bs
-  }
-}
 
 let duration = 10
 let testBluetooth = true
@@ -305,7 +35,6 @@ fs.readFile('config.json', (err, json) => {
 
   if (!ssid || !password) throw new Error('配置文件未提供可用的wifi配置')
   blog.log('本次测试使用如下配置：')
-  blog.log(`  测试时间：${duration}分钟 （该设置尚未生效）`)
   blog.log(`  ${testBluetooth ? '' : '不'}测试蓝牙 （代码尚未支持）`)
   blog.log(`  wifi：${ssid}`)
   blog.log(`  wifi密码：${password}`)
@@ -337,13 +66,13 @@ fs.readFile('config.json', (err, json) => {
           }
         })
       } else {
+        next()
         blog.log('计算测试文件哈希值')
         let rs = fs.createReadStream('random')
         let hash = crypto.createHash('sha256')
         rs.on('data', data => hash.update(data))
         rs.on('end', () => {
           digest = hash.digest('hex')
-          next()
         })
       }
     }
@@ -364,11 +93,9 @@ fs.readFile('config.json', (err, json) => {
 ifacemon.on('add', iface => {
   let soldier = new Soldier(iface, ssid, password)   
   soldier.on('tick', () => {
-    // process.stdout.write('\033[2J\033[;H')
-    // console.log('设备              | 压力测试 | EMMC测试                                             | SATA测试                                             | WiFi测试') 
     let data = []
     let hs = []
-    hs.push('设备地址'.padEnd(9, ' '))
+    hs.push('设备地址'.padEnd(7, ' '))
     hs.push('状态'.padEnd(6, ' '))
     hs.push('状态')
     hs.push('写入次数'.padStart(8 - 4, ' '))
@@ -388,7 +115,7 @@ ifacemon.on('add', iface => {
     Array.from(Soldiers).forEach(kv => {
       let bs = kv[1].brief() 
       let ds = []
-      ds.push(bs[0].padEnd(17, ' '))
+      ds.push(bs[0].padEnd(15, ' '))
       ds.push(bs[1].s.padEnd(6, ' '))
       ds.push(bs[2].s)
       ds.push(bs[2].wTime.padStart(8, ' '))
@@ -410,7 +137,7 @@ ifacemon.on('add', iface => {
     blist.setData(data)
   })
   Soldiers.set(iface.mac, soldier)
-  blog.log(`发现新设备：${iface.mac}`)
+  blog.log(`${iface.buddyIp} 新设备`)
 })
 
 ifacemon.on('remove', iface => {
@@ -420,5 +147,3 @@ ifacemon.on('remove', iface => {
     Soldiers.delete(iface.mac)
   }
 })
-
-
