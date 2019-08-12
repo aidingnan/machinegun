@@ -51,6 +51,7 @@ fs.readFile('config.json', (err, json) => {
         } 
         ws.end()
         digest = hash.digest('hex')
+        blog.log('测试文件生成完毕')
         next()
       }) 
     } else if (err) {
@@ -71,8 +72,9 @@ fs.readFile('config.json', (err, json) => {
         let rs = fs.createReadStream('random')
         let hash = crypto.createHash('sha256')
         rs.on('data', data => hash.update(data))
-        rs.on('end', () => {
+        rs.on('end', () => { 
           digest = hash.digest('hex')
+          blog.log('测试文件哈希值计算完毕')
         })
       }
     }
@@ -91,6 +93,7 @@ fs.readFile('config.json', (err, json) => {
 })
 
 ifacemon.on('add', iface => {
+  blog.log(`${iface.buddyIp} 发现新设备`)
   let soldier = new Soldier(iface, ssid, password)   
   soldier.on('tick', () => {
     let data = []
@@ -111,7 +114,6 @@ ifacemon.on('add', iface => {
     hs.push('下载次数'.padStart(8 - 4, ' '))
     hs.push('速度'.padStart(10 - 2, ' '))
     data.push(hs)
-
     Array.from(Soldiers).forEach(kv => {
       let bs = kv[1].brief() 
       let ds = []
@@ -130,14 +132,12 @@ ifacemon.on('add', iface => {
       ds.push(bs[4].s)
       ds.push(bs[4].dTime.padStart(8, ' '))
       ds.push(bs[4].dRate.padStart(10, ' '))
-      // console.log(ds.join(' | '))
       data.push(ds)
     })
 
     blist.setData(data)
   })
   Soldiers.set(iface.mac, soldier)
-  blog.log(`${iface.buddyIp} 新设备`)
 })
 
 ifacemon.on('remove', iface => {
