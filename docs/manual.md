@@ -109,6 +109,10 @@ Backus设备的USB RNDIS使用一致的OUI（`98:e8:fb`），该规则可以禁�
 
 完成配置后需要重启电脑。（用systemd重启udev服务可能不工作）
 
+## SATA SSD
+
+SATA SSD需要预先格式化成btrfs文件系统，无分区表。测试前应该安装到Backus板子上。测试软件不会格式化SSD。
+
 ## 使用
 
 在machinegun目录下运行，需要`sudo`。
