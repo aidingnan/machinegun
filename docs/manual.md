@@ -117,3 +117,7 @@ Backus设备的USB RNDIS使用一致的OUI（`98:e8:fb`），该规则可以禁�
 sudo node index.js
 ```
 
+## 已知问题
+
+- 尚无测试结束定义
+- 拔除设备时程序错误退出
