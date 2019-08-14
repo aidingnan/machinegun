@@ -4,5 +4,6 @@
   "wifi": {
     "ssid": "Xiaomi_123_5G",
     "password": "wisnuc123456"
-  }
+  },
+  "hostAddress": "10.10.9.75"
 }

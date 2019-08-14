@@ -12,7 +12,8 @@
   "license": "ISC",
   "dependencies": {
     "blessed": "^0.1.81",
-    "udev": "^0.6.0"
+    "udev": "^0.6.0",
+    "validator": "^11.1.0"
   },
   "devDependencies": {
     "eslint": "^6.1.0",
